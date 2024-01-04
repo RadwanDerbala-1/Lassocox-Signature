@@ -1,0 +1,265 @@
+
+
+```{r message=TRUE, warning=FALSE}
+#libraries
+library(DESeq2)
+library(RColorBrewer)
+library(pheatmap)
+library(gplots)
+library(biomaRt)
+library(PCAtools)
+library(DT)
+library(IHW)
+library(apeglm)
+library(EnhancedVolcano)
+library(ComplexHeatmap)
+library(TCGAbiolinks)
+library(dplyr)
+library(EnhancedVolcano)
+library(org.Hs.eg.db)
+library(miRBaseConverter)
+library(survival)
+library(survminer)
+library(stringr)
+
+
+
+```
+
+
+Preparing and downloading data
+
+```{r}
+
+mrna_query <- GDCquery(project = "TCGA-STAD",
+                data.category = "Transcriptome Profiling",
+                data.type = "Gene Expression Quantification",
+                       workflow.type = "STAR - Counts",
+                      experimental.strategy = "RNA-Seq",
+                
+                      ) 
+
+```
+
+
+Choose the Patients with 01A identifiers
+```{r}
+
+sample_ids <- getResults(mrna_query)
+sample_ids <- getResults(mrna_query, cols= c("cases.submitter_id","sample.submitter_id"))
+
+colnames(sample_ids)=c("Case.ID","Sample.ID")
+
+# Grab the patients with 01A Samples
+sample_ids_primary= sample_ids[grep("01A",sample_ids$Sample.ID),]
+# Them add the patients with 01B samples
+sample_ids_primary=rbind(sample_ids_primary, sample_ids[grep("01B",sample_ids$Sample.ID),])
+# If there are duplicates in case ID, then remove the 01B samples
+sample_ids_primary=sample_ids_primary[!duplicated(sample_ids_primary$Case.ID),]
+
+```
+
+
+```{r}
+
+
+mrna_query <- GDCquery(project = "TCGA-STAD",
+                data.category = "Transcriptome Profiling",
+                data.type = "Gene Expression Quantification",
+                       workflow.type = "STAR - Counts",
+                      experimental.strategy = "RNA-Seq",
+                       barcode=mrna_meta$sample) #adapted from cbioportals
+
+GDCdownload(mrna_query,directory=
+                      "T:\\Programming\\Data\\TMN Project\\Data\\RNA Seq - STAD")
+mrna_df<-GDCprepare(mrna_query, directory=
+                      "T:\\Programming\\Data\\TMN Project\\Data\\RNA Seq - STAD")
+
+```
+
+
+Store the expression file in an RDS for later access
+```{r}
+#saveRDS(mrna_df,file="STAD_mRNA_data.rds")
+mrna_df=readRDS("STAD_mRNA_data.rds")
+```
+
+Check the metadata
+
+```{r}
+mrna_meta=as.data.frame((colData(mrna_df)), 
+    options = list(scrollX = TRUE, keys = TRUE, pageLength = 5), 
+    rownames = FALSE)
+
+mrna_meta$ajcc_pathologic_stage <- str_remove_all(mrna_meta$ajcc_pathologic_stage, "[A-C]")
+
+#Choosing only stage I and III
+mrna_meta= mrna_meta[mrna_meta$ajcc_pathologic_stage == "Stage I" |mrna_meta$ajcc_pathologic_stage == "Stage III" ,]
+mrna_meta= mrna_meta[!is.na(mrna_meta$ajcc_pathologic_stage),]
+
+
+```
+
+
+```{r}
+# For (TPM counts) that will be used for CIBERSORT
+mrna_tpm = as.data.frame(assays(mrna_df)$tpm_unstrand)
+mrna_raw = as.data.frame(assay(mrna_df))
+```
+
+removing the extra letters at each column name (sample ID)
+```{r}
+#colnames(mrna_df)
+## tidy matrix colnames
+
+delim_fn = function(x, n, i){
+  do.call(c, lapply(x, function(X)
+    paste(unlist(strsplit(X, "-"))[(n+1):(i)], collapse = "-")))
+}
+
+colnames(mrna_tpm) <- delim_fn(x = colnames(mrna_tpm), n = 0, i = 4)
+colnames(mrna_raw) <- delim_fn(x = colnames(mrna_raw), n = 0, i = 4)
+
+
+```
+
+
+
+
+```{r}
+#Remove The Version from mrna_df ENSGIDs by the following code
+
+removeVersion <- function(ids){
+  return(unlist(lapply(stringr::str_split(ids, "[.]"), "[[",1)))
+}
+
+mrna_tpm=mrna_tpm[!duplicated(removeVersion(rownames(mrna_tpm))),]
+rownames(mrna_tpm)=removeVersion(rownames(mrna_tpm))
+
+
+mrna_raw=mrna_raw[!duplicated(removeVersion(rownames(mrna_raw))),]
+rownames(mrna_raw)=removeVersion(rownames(mrna_raw))
+
+```
+
+
+```{r}
+mrna_raw=mrna_raw[,match(mrna_meta$sample_submitter_id,colnames(mrna_raw))]
+
+all(colnames(mrna_raw) == mrna_meta$sample_submitter_id)
+
+```
+
+
+```{r}
+
+#First retrive the HGNC symbols for mrna_tpm for CIBERSORT, we retrieved protein coding genes only 
+
+mart <- useEnsembl(biomart = "ensembl", dataset = "hsapiens_gene_ensembl",version= 110)
+mrna_attributes <- getBM(attributes=c("external_gene_name",
+                                      "ensembl_gene_id",
+                                      "gene_biotype"),
+                         filters = c("ensembl_gene_id"),
+                         values = (rownames(mrna_raw)),
+                         mart = mart)
+
+
+
+mrna_attributes <- mrna_attributes[which(mrna_attributes$gene_biotype == "protein_coding"),]
+mrna_attributes <- mrna_attributes[which(mrna_attributes$external_gene_name != ""),]
+
+#Secondly, retrieve the HGNC symbols for mRNA_raw for DESEQ2 and further analysis
+
+
+mrna_raw_coding <- mrna_raw[which(rownames(mrna_raw) %in% mrna_attributes$ensembl_gene_id),]
+
+mrna_raw_coding=cbind(Genes=mrna_attributes$external_gene_name,mrna_raw_coding)
+
+
+# Assuming you have a data frame named 'data'
+gene_duplicates = mrna_raw_coding$Genes[duplicated(mrna_raw_coding$Genes)] # Replace with the actual gene name, same for both mRNA raw and TPM
+
+for (dup in gene_duplicates) {
+  
+  # Identify rows with the same gene name
+duplicates_indices = which(mrna_raw_coding[, 1] == dup)
+
+# Calculate row means
+duplicates_means = rowMeans(mrna_raw_coding[duplicates_indices, -1])
+
+# Find the row with the maximum mean
+min_mean_duplicate = which.min(duplicates_means)
+
+# Select the row with the higher mean
+mrna_raw_coding = mrna_raw_coding[-duplicates_indices[min_mean_duplicate], ]
+
+print(mrna_raw_coding[!duplicates_indices[min_mean_duplicate], ])
+  
+}
+
+#assigning the columns and gene names in mRNA raw
+mrna_tpm_coding = mrna_tpm[which(rownames(mrna_tpm) %in% rownames(mrna_raw_coding)),]
+rownames(mrna_tpm_coding)=mrna_raw_coding$Genes
+
+```
+
+
+```{r}
+
+row.names(mrna_raw_coding)=mrna_raw_coding[,1]
+mrna_raw_coding=mrna_raw_coding[,-1]
+all(mrna_meta$sample_submitter_id == colnames(mrna_raw_coding))
+mrna_meta[,1]=mrna_meta$sample_submitter_id
+row.names(mrna_meta)=NULL
+
+```
+
+```{r}
+
+## DESeq2 Analysis Macrophage
+mrna_dds_stage <- DESeqDataSetFromMatrix(
+  countData=round(mrna_raw_coding), 
+  colData = mrna_meta, 
+  design = ~ ajcc_pathologic_stage)
+
+mrna_dds_stage$ajcc_pathologic_stage <- relevel(mrna_dds_stage$ajcc_pathologic_stage, ref = "Stage I")
+mrna_dds_stage = DESeq(mrna_dds_stage) 
+
+#Why do you run the below code (line240)?
+
+#This normalized count line will be later needed for the heatmap
+
+normCounts <- counts(mrna_dds_stage, normalized=TRUE)
+
+## DESeq2 results
+mrna_res_stage=results(mrna_dds_stage , alpha = 0.05, lfcThreshold = 0, contrast = c("ajcc_pathologic_stage", "Stage III", "Stage I"))
+summary(mrna_res_stage)
+mrna_res_stage.df= as.data.frame(mrna_res_stage)
+
+```
+Differentially expressed genes
+```{r}
+#Filtering any gene with abs log2foldchange less than 1 and adjusted p-value more than 0.05
+
+DEGs_STAD = filter(mrna_res_stage.df, padj < 0.05 ,abs(log2FoldChange) > 1)
+  
+
+#Specifying which genes are the upregulated and storing them in a seperate variable
+Upreg_DEGs = filter(mrna_res_stage.df, padj < 0.05 ,log2FoldChange > 1)
+
+#Specifying which genes are the downregulated and storing them in a seperate variable
+Downreg_DEGs = filter(mrna_res_stage.df, padj < 0.05 ,log2FoldChange < -1)
+
+#write.table(Upreg_DEGs[,c(2,6)],"Upreg_DEGs.csv", sep= ",",row.names = TRUE, col.names = TRUE)
+#write.table(Downreg_DEGs[,c(2,6)], "Downreg_DEGs.csv", sep= ",",row.names = TRUE, col.names = TRUE)
+
+```
+
+Export tables as CSV
+```{r}
+write.table(mrna_raw_coding,"STAD_100_mrna_raw_coding.csv", sep= ",")
+write.table(mrna_tpm_coding,"STAD_100_mrna_tpm_coding.csv", sep= ",")
+write.table(sta[,c(2,6)], "Downreg_DEGs.csv", sep= ",",row.names = TRUE, col.names = TRUE)
+
+```
+
