@@ -1,0 +1,51 @@
+
+```{r}
+library(survival)
+library(survminer)
+library(gplots)
+library(plotly)
+library(dplyr)
+library(GEOquery)
+library(affy)
+library(dplyr)
+library(tidyverse)
+library(survival)
+library(survminer)
+library(jetset)
+library(readxl)
+```
+
+```{r}
+
+
+# get expression files with MAS5 normalization (showed better performance than RMA)
+exprs_gse = getGEO("GSE62254")
+exprs_gse= exprs_gse[["GSE62254_series_matrix.txt.gz"]]@assayData[["exprs"]]
+exprs_gse= as.data.frame(exprs_gse)
+
+
+setwd("T:\\Programming\\Data\\R\\TNBC Datasets\\Code\\Scores for Probes")
+jetset.hgu133=read.table("jetset.scores.hgu133plus2_3.4.0.csv",sep=",",header=T)
+
+
+# Subsetting only the probes that reflects best the rna expression quantification for multi-probed genes.
+true_jetset.hgu133=jetset.hgu133[jetset.hgu133$best==TRUE,]
+true_jetset.hgu133=true_jetset.hgu133[!duplicated(true_jetset.hgu133$symbol),] # probes with no symbols
+exprs_gse=exprs_gse[match(true_jetset.hgu133$probeset,row.names(exprs_gse)),]
+row.names(exprs_gse)=true_jetset.hgu133$symbol
+
+
+
+
+#Prepare the survival matrix
+exprs_gse=as.data.frame(exprs_gse)
+trans_exprs_gse=t(exprs_gse)
+#Adding survival data at the beginning
+trans_exprs_gse=as.data.frame(trans_exprs_gse)
+trans_exprs_gse=cbind(ID=row.names(trans_exprs_gse),trans_exprs_gse)
+colnames(ACRG_Survival)[1]="ID"
+SurvivalMatrix62254=merge(ACRG_Survival[,c(1,8,9)],trans_exprs_gse,by="ID")
+
+write.table(SurvivalMatrix62254,file="SurvivalMatrix62254.csv",sep=",",row.names = T, col.names = T)
+
+```
