@@ -31,6 +31,17 @@ The datsets utilized are the following:
 - Gene signature formulation, this step is performed by multiplying each coefficient by the quantity of gene expression
 - The gene signature accuracy is evaluated using the cumulative and dynamic AUC test
 
+## Files:
+- Source: contains the source code of jupyter
+-     Machine_STAD.RMD: contains the TCGA data pre-processing
+-     GSE_.RMD:contains the GSE data preprocessing
+-     Project_STAD.ipynb: contains the actual machine learning pipeline
+- Data : contains data files needed by R and/or by python
+-         Up/Down DEGs: Differentially expressed genes resulted from STAGE I / III
+-         TCGA_Clinical: from which data that doesn't have h.pylori was made
+-         mrna_tpm: Transcriptome of the 100 patients from the TCGA to be used in python
+-         GSE_63500.csv: Transcriptome of the 300 patients from GEO with their survival data
+-         ACRG Survival.xlsx: Survival data of the GSE, for the R part
 
 ## Example (Gastric)
 
