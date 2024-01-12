@@ -1,5 +1,3 @@
-
-
 ```{r message=TRUE, warning=FALSE}
 #libraries
 library(DESeq2)
@@ -26,39 +24,9 @@ library(stringr)
 
 ```
 
-
-Preparing and downloading data
-
 ```{r}
-
-mrna_query <- GDCquery(project = "TCGA-STAD",
-                data.category = "Transcriptome Profiling",
-                data.type = "Gene Expression Quantification",
-                       workflow.type = "STAR - Counts",
-                      experimental.strategy = "RNA-Seq",
-                
-                      ) 
-
+mrna_meta= read.table("stad_tcga_clinical_data_without_hpylori.tsv", sep='\t', head= T)
 ```
-
-
-Choose the Patients with 01A identifiers
-```{r}
-
-sample_ids <- getResults(mrna_query)
-sample_ids <- getResults(mrna_query, cols= c("cases.submitter_id","sample.submitter_id"))
-
-colnames(sample_ids)=c("Case.ID","Sample.ID")
-
-# Grab the patients with 01A Samples
-sample_ids_primary= sample_ids[grep("01A",sample_ids$Sample.ID),]
-# Them add the patients with 01B samples
-sample_ids_primary=rbind(sample_ids_primary, sample_ids[grep("01B",sample_ids$Sample.ID),])
-# If there are duplicates in case ID, then remove the 01B samples
-sample_ids_primary=sample_ids_primary[!duplicated(sample_ids_primary$Case.ID),]
-
-```
-
 
 ```{r}
 
@@ -68,7 +36,7 @@ mrna_query <- GDCquery(project = "TCGA-STAD",
                 data.type = "Gene Expression Quantification",
                        workflow.type = "STAR - Counts",
                       experimental.strategy = "RNA-Seq",
-                       barcode=mrna_meta$sample) #adapted from cbioportals
+                       barcode=mrna_meta$Sample.ID) #adapted from cbioportals
 
 GDCdownload(mrna_query,directory=
                       "T:\\Programming\\Data\\TMN Project\\Data\\RNA Seq - STAD")
@@ -77,11 +45,11 @@ mrna_df<-GDCprepare(mrna_query, directory=
 
 ```
 
-
 Store the expression file in an RDS for later access
+
 ```{r}
 #saveRDS(mrna_df,file="STAD_mRNA_data.rds")
-mrna_df=readRDS("STAD_mRNA_data.rds")
+#mrna_df=readRDS("STAD_mRNA_data.rds")
 ```
 
 Check the metadata
@@ -93,13 +61,13 @@ mrna_meta=as.data.frame((colData(mrna_df)),
 
 mrna_meta$ajcc_pathologic_stage <- str_remove_all(mrna_meta$ajcc_pathologic_stage, "[A-C]")
 
-#Choosing only stage I and III
-mrna_meta= mrna_meta[mrna_meta$ajcc_pathologic_stage == "Stage I" |mrna_meta$ajcc_pathologic_stage == "Stage III" ,]
+#Choosing only stage I and III or IV
+mrna_meta= mrna_meta[mrna_meta$ajcc_pathologic_stage == "Stage I" |mrna_meta$ajcc_pathologic_stage == "Stage III",]
+#mrna_meta= mrna_meta[mrna_meta$ajcc_pathologic_stage == "Stage I" |mrna_meta$ajcc_pathologic_stage == "Stage IV",] # Low number of stage IV samples (14) and lower number of DEGs (76 in comparison to 274)
 mrna_meta= mrna_meta[!is.na(mrna_meta$ajcc_pathologic_stage),]
 
 
 ```
-
 
 ```{r}
 # For (TPM counts) that will be used for CIBERSORT
@@ -108,6 +76,7 @@ mrna_raw = as.data.frame(assay(mrna_df))
 ```
 
 removing the extra letters at each column name (sample ID)
+
 ```{r}
 #colnames(mrna_df)
 ## tidy matrix colnames
@@ -122,9 +91,6 @@ colnames(mrna_raw) <- delim_fn(x = colnames(mrna_raw), n = 0, i = 4)
 
 
 ```
-
-
-
 
 ```{r}
 #Remove The Version from mrna_df ENSGIDs by the following code
@@ -142,14 +108,12 @@ rownames(mrna_raw)=removeVersion(rownames(mrna_raw))
 
 ```
 
-
 ```{r}
 mrna_raw=mrna_raw[,match(mrna_meta$sample_submitter_id,colnames(mrna_raw))]
 
 all(colnames(mrna_raw) == mrna_meta$sample_submitter_id)
 
 ```
-
 
 ```{r}
 
@@ -203,7 +167,6 @@ rownames(mrna_tpm_coding)=mrna_raw_coding$Genes
 
 ```
 
-
 ```{r}
 
 row.names(mrna_raw_coding)=mrna_raw_coding[,1]
@@ -237,7 +200,9 @@ summary(mrna_res_stage)
 mrna_res_stage.df= as.data.frame(mrna_res_stage)
 
 ```
+
 Differentially expressed genes
+
 ```{r}
 #Filtering any gene with abs log2foldchange less than 1 and adjusted p-value more than 0.05
 
@@ -255,11 +220,27 @@ Downreg_DEGs = filter(mrna_res_stage.df, padj < 0.05 ,log2FoldChange < -1)
 
 ```
 
-Export tables as CSV
 ```{r}
-write.table(mrna_raw_coding,"STAD_100_mrna_raw_coding.csv", sep= ",")
-write.table(mrna_tpm_coding,"STAD_100_mrna_tpm_coding.csv", sep= ",")
-write.table(sta[,c(2,6)], "Downreg_DEGs.csv", sep= ",",row.names = TRUE, col.names = TRUE)
+# The PCA 
+
+# Transform the normalized counts (by deseq2 size factors) to shrink genes with low expression and high dispersion 
+
+#blind=TRUE should be used for comparing samples in a manner unbiased by prior information on samples, for example to perform sample QA (quality assurance).
+vst_stage = vst(mrna_dds_stage, blind = TRUE)
+
+
+# Plot the PCA of PC1 and PC2
+plotPCA(vst_stage, intgroup= c("ajcc_pathologic_stage")) #capitalization is important
+
 
 ```
 
+Export tables as CSV
+
+```{r}
+write.table(mrna_raw_coding,"STAD_100_mrna_raw_coding.csv", sep= ",")
+write.table(mrna_tpm_coding,"STAD_100_mrna_tpm_coding.csv", sep= ",")
+write.table(Downreg_DEGs[,c(2,6)], "Downreg_DEGs.csv", sep= ",",row.names = TRUE, col.names = TRUE)
+write.table(Upreg_DEGs[,c(2,6)], "Upreg_DEGs.csv", sep= ",",row.names = TRUE, col.names = TRUE)
+
+```
