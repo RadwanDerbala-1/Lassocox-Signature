@@ -27,7 +27,7 @@ The datsets utilized are the following:
 
 - The conxnetsurvivalanalysis() function was used to predict the B (Beta) coefficients for each corresponding differentially expressed gene
 - Gridsearch was applied to test different values of alphas (different penalties), and different values of l1-ratio (elastic net)
-- The results were evaluated directly using a method called the concordance test; which indicates how concordant the hazard ratio was in respect to the survival time, calculated by c-index
+- The results were evaluated directly using a method called the concordance test; which indicates how concordant the hazard ratio was in respect to the survival time, calculated by c-index. 
 - Gene signature formulation, this step is performed by multiplying each coefficient by the quantity of gene expression
 - The gene signature accuracy is evaluated using the cumulative and dynamic AUC test
 
@@ -45,10 +45,10 @@ The datsets utilized are the following:
 
 ## Example (Gastric)
 
-The following lines show the basic functions of the coxnetsurvivalanalysis and its main parameters
+The following lines show the functions of the coxnetsurvivalanalysis provided by Sklearn Survival package and its main parameters
 ```python
 estimator=CoxnetSurvivalAnalysis(alphas=[0.18], n_alphas=20, l1_ratio=1, alpha_min_ratio=0.5 ,verbose = 10)
-estimator.fit(X,Y)
+estimator.fit(X,Y) #X will stand for the features matrix # Y will contain the corresponding survival data
 ```
 - n_alphas refers to the number of steps that the software will take from the alpha you initialize to the alpha_min_ratio
 - alphas refers to the value of alpha from which the software will start with
