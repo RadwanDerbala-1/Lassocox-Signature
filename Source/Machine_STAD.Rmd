@@ -232,6 +232,10 @@ vst_stage = vst(mrna_dds_stage, blind = TRUE)
 # Plot the PCA of PC1 and PC2
 plotPCA(vst_stage, intgroup= c("ajcc_pathologic_stage")) #capitalization is important
 
+# The most prestigious volcano plot ever
+
+EnhancedVolcano(mrna_res_stage.df, x= "log2FoldChange", y="padj", lab =row.names(mrna_res_stage.df) , pCutoff = 5e-2, FCcutoff = 1)
+
 
 ```
 
